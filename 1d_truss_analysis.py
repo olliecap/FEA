@@ -15,7 +15,7 @@ class element:
     def local_stiffness_matrix(self):
         k = (self.material * self.area) / self.length
         mat = k* np.array([[1, -1],
-                        [-1, 1]])
+        [-1, 1]])
         return mat
 
 # node class makes node for each point necessary. force and displacement depend on the boundary condition
@@ -101,37 +101,51 @@ def boundary_conditions(nodeList, gsm, fMatrix):
 Takes the truss stiffness matrix, displacements from both fixed ends, and solve for the reaction
 forces. Displacement and force are taken from nodeList, k has local_stiffness_matrix """
 
-""" MAKE SURE PARTITION STUFF ACTUALLY APPENDS CORRECTLY, FIGURE OUT HOW TO
-RESTRUCTURE FORCE AND DISPLACEMENT VECTOR, COMMENT EVERYWHERE AND FIX NAMES AS WELL"""
-
-def solver(f, k, u):
-    k_sparse = csr_matrix(k)
+"""
+MAKE A FOR LOOP THAT PARTITIONS BOTH THE STIFFNESS MATRIX WITH BOUNDARY conditions
+AND THE STIFFNESS MATRIX WITHOUT BOUNDARY CONDITIONS, COMMENT EVERYWHERE AND FIX NAMES AS WELL
+"""
+# bck = boundary conditioned k, ogk = orignal k matrix
+def solver(f, bck, ogk, u):
     u_displacement = []
     k_displacement = []
-    partition_displacement = np.zeros()
-    partition_force = np.array([ [], [] ])
+    partition_k_displacement = []
+    partition_k_force = []
     for i, displacement in enumerate(u):
         if np.isnan(displacement):
             u_displacement.append(i)
-            partition_displacement[1].append(displacement)
-            partition_force[1].append(f[i])
+            partition_k_force.append(f[i])
         else:
             k_displacement.append(i)
-            partition_displacement[0].append(displacement)
-            partition_force[0].append(f[i])
+            partition_k_displacement.append(displacement)
+    partition_k_force = np.array(partition_k_force)
+    partition_k_displacement = np.array(partition_k_displacement)
+
     # partition the gsm into 4 parts, known known, unknown known, known unknown, and unknown unknown, based on what displacements we know
-    k_uu = k_sparse[np.ix_(u_displacement, u_displacement)]
-    k_uk = k_sparse[np.ix_(u_displacement, k_displacement)]
-    k_ku = k_sparse[np.ix_(k_displacement, u_displacement)]
-    k_kk = k_sparse[np.ix_(k_displacement, k_displacement)]
+    k_uu = k[np.ix_(u_displacement, u_displacement)]
+    k_uk = k[np.ix_(u_displacement, k_displacement)]
+    k_ku = k[np.ix_(k_displacement, u_displacement)]
+    k_kk = k[np.ix_(k_displacement, k_displacement)]
 
     # solves for unknown displacements
-    partition_displacement[1] = spsolve(inv(k_uu), partition_force[1] - np.dot(k_uk, partition_displacement[0]))
+    partition_u_displacement = spsolve(k_uu, partition_k_force - k_uk @ partition_k_displacement)
 
     # solves for unknown forces
-    partition_force[1] = np.dot(k_kk, partition_displacement[0]) + np.dot(k_ku, partition_displacement[1])
+    partition_u_force = k_ku @ partition_u_displacement + k_kk @ partition_k_displacement
 
-    print(partition_displacement, partition_force)
+    # adds the unknown forces and displacments back to the orignal matrices
+    z = 0
+    for i, displacement in enumerate(u):
+        if np.isnan(displacement):
+            u[i] = partition_u_displacement[z]
+            z += 1
+    z = 0
+    for i, force in enumerate(f):
+        if np.isnan(force):
+            u[z] = partition_u_force[z]
+            z += 1
+    return f , u
+
 def main():
     allTheNodes = nodeMaker()
     elements, lsms = element_maker(allTheNodes)
@@ -139,7 +153,8 @@ def main():
     fmat = force_matrix(allTheNodes)
     gm = global_matrix(allTheNodes, lsms)
     gsm, fmat = boundary_conditions(allTheNodes, gm, fmat)
-    solver(fmat, gsm, umat)
+    print(gsm)
+    solver(fmat, gsm, gm, umat)
 
 if __name__ == '__main__':
     main()
